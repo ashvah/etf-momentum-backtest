@@ -2,9 +2,13 @@ LICENSE
 README.md
 pyproject.toml
 src/etf_momentum_backtest/__init__.py
+src/etf_momentum_backtest/__main__.py
+src/etf_momentum_backtest/cli.py
+src/etf_momentum_backtest/config.py
 src/etf_momentum_backtest.egg-info/PKG-INFO
 src/etf_momentum_backtest.egg-info/SOURCES.txt
 src/etf_momentum_backtest.egg-info/dependency_links.txt
 src/etf_momentum_backtest.egg-info/entry_points.txt
 src/etf_momentum_backtest.egg-info/requires.txt
 src/etf_momentum_backtest.egg-info/top_level.txt
+tests/test_smoke.py

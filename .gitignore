@@ -11,3 +11,8 @@ outputs/results/*
 !data/processed/.gitkeep
 !outputs/figures/.gitkeep
 !outputs/results/.gitkeep
+
+*.egg-info/
+.ruff-cache/
+.pytest_cache/
+__pycache__/

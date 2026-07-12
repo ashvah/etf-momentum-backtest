@@ -11,4 +11,5 @@ src/etf_momentum_backtest.egg-info/dependency_links.txt
 src/etf_momentum_backtest.egg-info/entry_points.txt
 src/etf_momentum_backtest.egg-info/requires.txt
 src/etf_momentum_backtest.egg-info/top_level.txt
-tests/test_smoke.py
+tests/test_cli.py
+tests/test_config.py

@@ -1,0 +1,13 @@
+.venv/
+venv/
+
+data/raw/*
+data/processed/*
+
+outputs/figures/*
+outputs/results/*
+
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!outputs/figures/.gitkeep
+!outputs/results/.gitkeep

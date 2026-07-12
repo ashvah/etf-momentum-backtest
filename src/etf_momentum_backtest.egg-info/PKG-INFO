@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: etf-momentum-backtest
+Version: 0.1.0
+Summary: A reproducible Python backtest of a monthly ETF momentum rotation strategy.
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: matplotlib
+Requires-Dist: pyarrow
+Requires-Dist: yfinance
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Provides-Extra: research
+Requires-Dist: jupyterlab; extra == "research"
+Dynamic: license-file
+
+# ETF Momentum Rotation Backtest
+
+A reproducible Python backtest of a monthly momentum rotation strategy across U.S. ETFs.

@@ -5,6 +5,7 @@ from etf_momentum_backtest.config import (
     DEFAULT_TICKERS,
     BacktestConfig,
 )
+from etf_momentum_backtest.data import load_prices
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -61,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Initial portfolio capital.",
     )
 
+    parser.add_argument(
+        "--refresh-data",
+        action="store_true",
+        help="Download fresh market data instead of using the local cache.",
+    )
+
     return parser
 
 
@@ -99,6 +106,17 @@ def main(
     print(f"Top K: {config.top_k}")
     print(f"Transaction cost: {config.transaction_cost_rate:.2%}")
     print(f"Initial capital: {config.initial_capital:,.2f}")
+
+    prices = load_prices(
+        config=config,
+        refresh=args.refresh_data,
+    )
+
+    print(
+        f"Loaded {len(prices):,} daily observations "
+        f"from {prices.index.min().date()} "
+        f"to {prices.index.max().date()}."
+    )
 
 
 if __name__ == "__main__":

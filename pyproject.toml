@@ -13,7 +13,7 @@ dependencies = [
     "pandas",
     "matplotlib",
     "pyarrow",
-    "yfinance",
+    "akshare",
 ]
 
 [project.optional-dependencies]

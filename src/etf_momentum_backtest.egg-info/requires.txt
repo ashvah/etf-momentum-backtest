@@ -2,7 +2,7 @@ numpy
 pandas
 matplotlib
 pyarrow
-yfinance
+akshare
 
 [dev]
 pytest

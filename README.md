@@ -64,7 +64,7 @@ Core dependencies include:
 * pandas;
 * Matplotlib;
 * PyArrow;
-* yfinance.
+* AKShare.
 
 Development and research tools include:
 

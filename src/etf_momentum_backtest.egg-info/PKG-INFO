@@ -8,7 +8,7 @@ Requires-Dist: numpy
 Requires-Dist: pandas
 Requires-Dist: matplotlib
 Requires-Dist: pyarrow
-Requires-Dist: yfinance
+Requires-Dist: akshare
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: ruff; extra == "dev"
@@ -82,7 +82,7 @@ Core dependencies include:
 * pandas;
 * Matplotlib;
 * PyArrow;
-* yfinance.
+* AKShare.
 
 Development and research tools include:
 

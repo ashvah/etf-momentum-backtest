@@ -1,95 +1,197 @@
+from datetime import date
 from pathlib import Path
-import random
 import time
+import akshare as ak
 import pandas as pd
-import yfinance as yf
-from yfinance.exceptions import YFRateLimitError
 
 from etf_momentum_backtest.config import BacktestConfig
+from requests.exceptions import (
+    ConnectionError as RequestsConnectionError,
+)
+from requests.exceptions import ProxyError, Timeout
 
 
-def download_prices(
-    config: BacktestConfig,
-    max_attempts: int = 4,
-    base_delay_seconds: float = 2.0,
-) -> pd.DataFrame:
-    """Download adjusted closing prices with limited retries."""
+def format_akshare_date(value: str | None) -> str:
+    """Convert an ISO date into AKShare's YYYYMMDD format."""
+
+    if value is None:
+        return date.today().strftime("%Y%m%d")
+
+    return date.fromisoformat(value).strftime("%Y%m%d")
+
+
+def resolve_akshare_symbols(
+    tickers: tuple[str, ...],
+) -> dict[str, str]:
+    """Map ordinary tickers to Eastmoney symbols used by AKShare."""
+
+    universe = ak.stock_us_spot_em()
+
+    if universe.empty:
+        raise RuntimeError("AKShare returned an empty U.S. ticker universe.")
+
+    if "代码" not in universe.columns:
+        raise RuntimeError("AKShare ticker universe does not contain the 代码 column.")
+
+    codes = universe["代码"].astype(str).str.strip()
+
+    lookup = pd.DataFrame(
+        {
+            "provider_symbol": codes,
+            "ticker": (codes.str.rsplit(".", n=1).str[-1].str.upper()),
+        }
+    )
+
+    result: dict[str, str] = {}
+
+    for ticker in tickers:
+        matches = lookup.loc[
+            lookup["ticker"] == ticker,
+            "provider_symbol",
+        ]
+
+        if matches.empty:
+            raise ValueError(f"Ticker {ticker!r} was not found by AKShare.")
+
+        if len(matches) > 1:
+            symbols = ", ".join(matches.tolist())
+            raise ValueError(
+                f"Ticker {ticker!r} maps to multiple AKShare symbols: {symbols}"
+            )
+
+        result[ticker] = matches.iloc[0]
+
+    return result
+
+
+class MarketDataConnectionError(RuntimeError):
+    """Raised when the configured market-data source is unreachable."""
+
+
+def download_single_ticker(
+    ticker: str,
+    start_date: str,
+    end_date: str | None,
+    max_attempts: int = 3,
+) -> pd.Series:
+    """Download one adjusted closing-price series from Sina via AKShare."""
 
     last_error: Exception | None = None
 
     for attempt in range(max_attempts):
         try:
-            data = yf.download(
-                tickers=list(config.tickers),
-                start=config.start_date,
-                end=config.end_date,
-                auto_adjust=True,
-                progress=True,
-                threads=False,
-                timeout=30,
+            data = ak.stock_us_daily(
+                symbol=ticker,
+                adjust="qfq",
             )
 
-            if not data.empty:
-                prices = extract_close_prices(
-                    data=data,
-                    tickers=config.tickers,
+            if data.empty:
+                raise RuntimeError(
+                    f"AKShare returned no data for {ticker}."
                 )
 
-                return clean_prices(
-                    prices=prices,
-                    expected_tickers=config.tickers,
+            required_columns = {"date", "close"}
+            missing_columns = required_columns - set(data.columns)
+
+            if missing_columns:
+                missing = ", ".join(sorted(missing_columns))
+                raise RuntimeError(
+                    f"AKShare data for {ticker} is missing "
+                    f"columns: {missing}"
                 )
 
-        except YFRateLimitError as error:
+            dates = pd.to_datetime(
+                data["date"],
+                errors="coerce",
+            )
+
+            prices = pd.to_numeric(
+                data["close"],
+                errors="coerce",
+            )
+
+            series = pd.Series(
+                data=prices.to_numpy(),
+                index=dates,
+                name=ticker,
+                dtype="float64",
+            )
+
+            series = series.loc[series.index.notna()]
+            series = series.loc[
+                ~series.index.duplicated(keep="last")
+            ]
+            series = series.sort_index()
+            series = series.dropna()
+
+            start = pd.Timestamp(start_date)
+            series = series.loc[series.index >= start]
+
+            if end_date is not None:
+                end = pd.Timestamp(end_date)
+                series = series.loc[series.index <= end]
+
+            if series.empty:
+                raise RuntimeError(
+                    f"No valid prices remained for {ticker} "
+                    "after applying the configured date range."
+                )
+        
+            return series
+
+        except (
+            ProxyError,
+            Timeout,
+            RequestsConnectionError,
+        ) as error:
             last_error = error
 
-        if attempt < max_attempts - 1:
-            delay = base_delay_seconds * (2**attempt) + random.uniform(0.0, 1.0)
-            time.sleep(delay)
+            if attempt < max_attempts - 1:
+                time.sleep(2**attempt)
 
-    message = (
-        "Yahoo Finance did not return market data after "
-        f"{max_attempts} attempts. The data source may be rate limited."
+    raise MarketDataConnectionError(
+        f"Unable to download market data for {ticker} "
+        f"after {max_attempts} attempts."
+    ) from last_error
+
+def download_prices(
+    config: BacktestConfig,
+) -> pd.DataFrame:
+    """Download adjusted daily closing prices through AKShare."""
+
+    series_list: list[pd.Series] = []
+
+    for ticker in config.tickers:
+        series = download_single_ticker(
+            ticker=ticker,
+            start_date=config.start_date,
+            end_date=config.end_date,
+        )
+
+        series_list.append(series)
+
+    prices = pd.concat(
+        series_list,
+        axis="columns",
     )
 
-    if last_error is not None:
-        raise RuntimeError(message) from last_error
-
-    raise RuntimeError(message)
-
-
-def extract_close_prices(
-    data: pd.DataFrame,
-    tickers: tuple[str, ...],
-) -> pd.DataFrame:
-    """Extract closing prices from yfinance output."""
-
-    if isinstance(data.columns, pd.MultiIndex):
-        if "Close" not in data.columns.get_level_values(0):
-            raise ValueError("Downloaded data does not contain Close prices.")
-
-        prices = data["Close"].copy()
-    else:
-        if "Close" not in data.columns:
-            raise ValueError("Downloaded data does not contain Close prices.")
-
-        prices = data[["Close"]].copy()
-        prices.columns = [tickers[0]]
-
-    return prices
+    return clean_prices(
+        prices=prices,
+        expected_tickers=config.tickers,
+    )
 
 
 def clean_prices(
     prices: pd.DataFrame,
     expected_tickers: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Normalize and validate the downloaded price matrix."""
+    """Normalize and validate a closing-price matrix."""
 
     cleaned = prices.copy()
 
     cleaned.index = pd.to_datetime(cleaned.index)
     cleaned = cleaned.sort_index()
-    cleaned = cleaned.loc[~cleaned.index.duplicated(keep="first")]
+    cleaned = cleaned.loc[~cleaned.index.duplicated(keep="last")]
 
     cleaned.columns = [str(column).strip().upper() for column in cleaned.columns]
 
@@ -101,8 +203,11 @@ def clean_prices(
 
     cleaned = cleaned.loc[:, list(expected_tickers)]
 
+    # First remove dates on which every asset is missing.
     cleaned = cleaned.dropna(how="all")
-    cleaned = cleaned.dropna()
+
+    # Baseline project uses a common complete-data period.
+    cleaned = cleaned.dropna(how="any")
 
     validate_prices(
         prices=cleaned,
@@ -116,7 +221,7 @@ def validate_prices(
     prices: pd.DataFrame,
     expected_tickers: tuple[str, ...],
 ) -> None:
-    """Validate the processed price matrix."""
+    """Validate the processed closing-price matrix."""
 
     if prices.empty:
         raise ValueError("Price data is empty.")
@@ -136,25 +241,44 @@ def validate_prices(
     if prices.isna().any().any():
         raise ValueError("Price data contains missing values.")
 
-    if not prices.map(pd.api.types.is_number).all().all():
-        raise TypeError("Price data must contain numeric values.")
+    non_numeric_columns = [
+        column
+        for column in prices.columns
+        if not pd.api.types.is_numeric_dtype(prices[column])
+    ]
+
+    if non_numeric_columns:
+        raise TypeError(f"Non-numeric price columns: {non_numeric_columns}")
 
     if (prices <= 0).any().any():
-        raise ValueError("Price data contains non-positive prices.")
+        invalid_columns = prices.columns[
+            (prices <= 0).any()
+        ].tolist()
+
+        raise ValueError(
+            "Ratio-based return calculations require strictly "
+            "positive adjusted prices. Non-positive values were "
+            f"found in: {invalid_columns}. Consider using backward-"
+            "adjusted prices or a later start date."
+        )
 
 
 def get_price_cache_path(
     config: BacktestConfig,
 ) -> Path:
+    """Return the processed-price cache path."""
+
     ticker_key = "_".join(config.tickers)
 
-    return config.processed_data_dir / f"prices_{ticker_key}.parquet"
+    return config.processed_data_dir / f"prices_akshare_{ticker_key}.parquet"
 
 
 def save_prices(
     prices: pd.DataFrame,
     path: Path,
 ) -> None:
+    """Save processed prices as Parquet."""
+
     path.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -166,6 +290,8 @@ def save_prices(
 def read_cached_prices(
     path: Path,
 ) -> pd.DataFrame:
+    """Read processed prices from a Parquet cache."""
+
     prices = pd.read_parquet(path)
     prices.index = pd.to_datetime(prices.index)
 
@@ -176,7 +302,7 @@ def load_prices(
     config: BacktestConfig,
     refresh: bool = False,
 ) -> pd.DataFrame:
-    """Load processed prices from cache or download them."""
+    """Load cached prices or download them through AKShare."""
 
     cache_path = get_price_cache_path(config)
 
@@ -190,19 +316,11 @@ def load_prices(
 
         return prices
 
-    try:
-        prices = download_prices(config)
-    except RuntimeError:
-        # If refreshing fails but a valid cache exists,
-        # do not silently replace or delete it.
-        if cache_path.exists():
-            raise RuntimeError(
-                "Fresh data download failed, but an older cache exists. "
-                "Run without --refresh-data to use the cached data."
-            )
+    prices = download_prices(config)
 
-        raise
-
-    save_prices(prices, cache_path)
+    save_prices(
+        prices=prices,
+        path=cache_path,
+    )
 
     return prices

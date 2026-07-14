@@ -1,12 +1,40 @@
 import pandas as pd
+from typing import Any
 import pytest
 
-from etf_momentum_backtest.config import BacktestConfig
 from etf_momentum_backtest.data import (
     clean_prices,
     validate_prices,
-    download_prices,
+    resolve_akshare_symbols,
+    download_single_ticker,
 )
+
+
+def test_akshare_symbols_are_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_universe = pd.DataFrame(
+        {
+            "代码": [
+                "107.SPY",
+                "105.QQQ",
+                "106.GLD",
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        "etf_momentum_backtest.data.ak.stock_us_spot_em",
+        lambda: fake_universe,
+    )
+
+    result = resolve_akshare_symbols(("SPY", "QQQ", "GLD"))
+
+    assert result == {
+        "SPY": "107.SPY",
+        "QQQ": "105.QQQ",
+        "GLD": "106.GLD",
+    }
 
 
 def make_valid_prices() -> pd.DataFrame:
@@ -87,27 +115,59 @@ def test_missing_ticker_is_rejected() -> None:
         )
 
 
-def test_empty_download_response_is_rejected(
+def test_single_ticker_download_is_normalized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fake_download(**kwargs: object) -> pd.DataFrame:
-        return pd.DataFrame()
-
-    monkeypatch.setattr(
-        "etf_momentum_backtest.data.yf.download",
-        fake_download,
+    fake_data = pd.DataFrame(
+        {
+            "日期": [
+                "2024-01-03",
+                "2024-01-02",
+            ],
+            "收盘": [
+                101.0,
+                100.0,
+            ],
+        }
     )
 
-    config = BacktestConfig(
-        tickers=("SPY", "IWM", "GLD"),
-        top_k=2,
+    def fake_stock_us_hist(
+        **kwargs: Any,
+    ) -> pd.DataFrame:
+        return fake_data
+
+    monkeypatch.setattr(
+        "etf_momentum_backtest.data.ak.stock_us_hist",
+        fake_stock_us_hist,
+    )
+
+    prices = download_single_ticker(
+        ticker="SPY",
+        provider_symbol="107.SPY",
+        start_date="20240101",
+        end_date="20240131",
+    )
+
+    assert prices.name == "SPY"
+    assert prices.index.is_monotonic_increasing
+    assert prices.tolist() == [100.0, 101.0]
+
+
+def test_empty_akshare_response_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "etf_momentum_backtest.data.ak.stock_us_hist",
+        lambda **kwargs: pd.DataFrame(),
     )
 
     with pytest.raises(
         RuntimeError,
-        match="did not return market data",
+        match="returned no data",
     ):
-        download_prices(
-            config=config,
-            max_attempts=1,
+        download_single_ticker(
+            ticker="SPY",
+            provider_symbol="107.SPY",
+            start_date="20240101",
+            end_date="20240131",
         )

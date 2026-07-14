@@ -1,6 +1,7 @@
 import argparse
 from collections.abc import Sequence
 
+import numpy as np
 import pandas as pd
 
 from etf_momentum_backtest.backtest import (
@@ -16,25 +17,25 @@ from etf_momentum_backtest.strategy import (
     generate_target_weights,
 )
 
+from etf_momentum_backtest.metrics import (
+    PerformanceMetrics,
+    summarize_performance,
+)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
 
     parser = argparse.ArgumentParser(
         prog="etf-momentum",
-        description=(
-            "Run a monthly ETF momentum rotation backtest."
-        ),
+        description=("Run a monthly ETF momentum rotation backtest."),
     )
 
     parser.add_argument(
         "--tickers",
         nargs="+",
         default=None,
-        help=(
-            "ETF ticker universe. "
-            "Defaults to SPY QQQ TLT IEF GLD."
-        ),
+        help=("ETF ticker universe. Defaults to SPY QQQ TLT IEF GLD."),
     )
 
     parser.add_argument(
@@ -70,10 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--cost-bps",
         type=float,
         default=10.0,
-        help=(
-            "Transaction cost in basis points per unit "
-            "of traded notional."
-        ),
+        help=("Transaction cost in basis points per unit of traded notional."),
     )
 
     parser.add_argument(
@@ -86,10 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--refresh-data",
         action="store_true",
-        help=(
-            "Ignore existing market-data caches and "
-            "download fresh raw data."
-        ),
+        help=("Ignore existing market-data caches and download fresh raw data."),
     )
 
     return parser
@@ -100,11 +95,7 @@ def create_config(
 ) -> BacktestConfig:
     """Convert parsed command-line arguments into a config."""
 
-    tickers = (
-        DEFAULT_TICKERS
-        if args.tickers is None
-        else tuple(args.tickers)
-    )
+    tickers = DEFAULT_TICKERS if args.tickers is None else tuple(args.tickers)
 
     return BacktestConfig(
         tickers=tickers,
@@ -112,9 +103,7 @@ def create_config(
         end_date=args.end_date,
         lookback_days=args.lookback_days,
         top_k=args.top_k,
-        transaction_cost_rate=(
-            args.cost_bps / 10_000
-        ),
+        transaction_cost_rate=(args.cost_bps / 10_000),
         initial_capital=args.initial_capital,
     )
 
@@ -127,64 +116,35 @@ def print_configuration(
     print("ETF Momentum Rotation Backtest")
     print("-" * 40)
 
-    print(
-        "Tickers: "
-        f"{', '.join(config.tickers)}"
-    )
+    print(f"Tickers: {', '.join(config.tickers)}")
 
-    print(
-        f"Date range: {config.start_date} "
-        f"to {config.end_date or 'latest'}"
-    )
+    print(f"Date range: {config.start_date} to {config.end_date or 'latest'}")
 
-    print(
-        f"Lookback days: "
-        f"{config.lookback_days}"
-    )
+    print(f"Lookback days: {config.lookback_days}")
 
-    print(
-        f"Top K: {config.top_k}"
-    )
+    print(f"Top K: {config.top_k}")
 
-    print(
-        "Transaction cost: "
-        f"{config.transaction_cost_rate:.2%}"
-    )
+    print(f"Transaction cost: {config.transaction_cost_rate:.2%}")
 
-    print(
-        "Initial capital: "
-        f"${config.initial_capital:,.2f}"
-    )
+    print(f"Initial capital: ${config.initial_capital:,.2f}")
+
+
+def format_ratio(value: float) -> str:
+    """Format a ratio while handling undefined values."""
+
+    if np.isnan(value):
+        return "N/A"
+
+    return f"{value:.2f}"
 
 
 def print_backtest_summary(
     prices: pd.DataFrame,
     target_weights: pd.DataFrame,
     result: BacktestResult,
-    config: BacktestConfig,
+    metrics: PerformanceMetrics,
 ) -> None:
-    """Print a basic summary of the completed backtest."""
-
-    first_date = prices.index.min().date()
-    last_date = prices.index.max().date()
-
-    final_value = float(
-        result.portfolio_value.iloc[-1]
-    )
-
-    total_return = (
-        final_value
-        / config.initial_capital
-        - 1.0
-    )
-
-    total_turnover = float(
-        result.turnover.sum()
-    )
-
-    total_transaction_costs = float(
-        result.transaction_costs.sum()
-    )
+    """Print a performance summary."""
 
     print()
     print("Data")
@@ -192,40 +152,57 @@ def print_backtest_summary(
 
     print(
         f"Loaded {len(prices):,} daily observations "
-        f"from {first_date} to {last_date}."
+        f"from {metrics.start_date.date()} "
+        f"to {metrics.end_date.date()}."
     )
 
-    print(
-        f"Generated {len(target_weights):,} "
-        "monthly signals."
-    )
+    print(f"Generated {len(target_weights):,} monthly signals.")
 
-    print(
-        f"Executed "
-        f"{len(result.execution_targets):,} "
-        "rebalances."
-    )
+    print(f"Executed {metrics.number_of_rebalances:,} rebalances.")
 
     print()
-    print("Backtest Results")
+    print("Return and Risk")
     print("-" * 40)
 
-    print(
-        "Final portfolio value: "
-        f"${final_value:,.2f}"
-    )
+    print(f"Final portfolio value: ${metrics.final_value:,.2f}")
+
+    print(f"Total return: {metrics.total_return:.2%}")
+
+    print(f"CAGR: {metrics.cagr:.2%}")
+
+    print(f"Annualized volatility: {metrics.annualized_volatility:.2%}")
+
+    print(f"Sharpe ratio: {format_ratio(metrics.sharpe_ratio)}")
+
+    print(f"Sortino ratio: {format_ratio(metrics.sortino_ratio)}")
+
+    print(f"Maximum drawdown: {metrics.max_drawdown:.2%}")
 
     print(
-        f"Total return: {total_return:.2%}"
+        "Maximum drawdown duration: "
+        f"{metrics.max_drawdown_duration_periods} "
+        "trading periods"
     )
 
-    print(
-        f"Total turnover: {total_turnover:.2f}x"
-    )
+    print(f"Calmar ratio: {format_ratio(metrics.calmar_ratio)}")
+
+    print()
+    print("Trading")
+    print("-" * 40)
+
+    print(f"Total turnover: {metrics.total_turnover:.2f}x")
+
+    print(f"Annualized turnover: {metrics.annualized_turnover:.2f}x")
 
     print(
-        "Total transaction costs: "
-        f"${total_transaction_costs:,.2f}"
+        f"Average turnover per rebalance: {metrics.average_turnover_per_rebalance:.2f}x"
+    )
+
+    print(f"Total transaction costs: ${metrics.total_transaction_costs:,.2f}")
+
+    print(
+        "Transaction costs / initial capital: "
+        f"{metrics.transaction_cost_to_initial_capital:.2%}"
     )
 
 
@@ -258,6 +235,8 @@ def main(
             config=config,
         )
 
+        metrics = summarize_performance(result)
+
     except (
         ValueError,
         TypeError,
@@ -266,8 +245,5 @@ def main(
         parser.error(str(error))
 
     print_backtest_summary(
-        prices=prices,
-        target_weights=target_weights,
-        result=result,
-        config=config,
+        prices=prices, target_weights=target_weights, result=result, metrics=metrics
     )

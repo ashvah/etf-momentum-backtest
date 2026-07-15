@@ -123,7 +123,7 @@ def generate_target_weights(
 def validate_target_weights(
     weights: pd.DataFrame,
     expected_tickers: tuple[str, ...],
-    top_k: int,
+    top_k: int | None = None,
 ) -> None:
     """Validate signal-date target portfolio weights."""
 
@@ -139,6 +139,12 @@ def validate_target_weights(
     ):
         raise TypeError("Target-weight index must be a DatetimeIndex.")
 
+    if not weights.index.is_monotonic_increasing:
+        raise ValueError("Target-weight index must be sorted.")
+
+    if weights.index.has_duplicates:
+        raise ValueError("Target-weight index contains duplicate dates.")
+
     if tuple(weights.columns) != expected_tickers:
         raise ValueError(
             "Target-weight columns do not match the configured ticker order."
@@ -147,15 +153,31 @@ def validate_target_weights(
     if weights.isna().any().any():
         raise ValueError("Target weights contain missing values.")
 
+    non_numeric_columns = [
+        column
+        for column in weights.columns
+        if not pd.api.types.is_numeric_dtype(weights[column])
+    ]
+
+    if non_numeric_columns:
+        raise TypeError(f"Non-numeric target-weight columns: {non_numeric_columns}")
+
     if (weights < 0).any().any():
         raise ValueError("Long-only target weights cannot be negative.")
+
+    if (weights > 1).any().any():
+        raise ValueError("Individual target weights cannot exceed 1.")
 
     row_sums = weights.sum(axis="columns")
 
     if not row_sums.round(12).eq(1.0).all():
         raise ValueError("Each target-weight row must sum to 1.")
 
-    selected_counts = weights.gt(0).sum(axis="columns")
+    if top_k is not None:
+        if top_k <= 0:
+            raise ValueError("top_k must be positive.")
 
-    if not selected_counts.eq(top_k).all():
-        raise ValueError("Each signal must select exactly top_k assets.")
+        selected_counts = weights.gt(0).sum(axis="columns")
+
+        if not selected_counts.eq(top_k).all():
+            raise ValueError("Each signal must select exactly top_k assets.")

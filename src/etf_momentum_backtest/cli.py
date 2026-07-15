@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 from etf_momentum_backtest.backtest import (
-    BacktestResult,
     run_backtest,
 )
 from etf_momentum_backtest.config import (
@@ -20,6 +19,14 @@ from etf_momentum_backtest.strategy import (
 from etf_momentum_backtest.metrics import (
     PerformanceMetrics,
     summarize_performance,
+)
+
+from etf_momentum_backtest.benchmarks import (
+    run_benchmarks,
+)
+
+from etf_momentum_backtest.reporting import (
+    save_analysis_outputs,
 )
 
 
@@ -141,7 +148,6 @@ def format_ratio(value: float) -> str:
 def print_backtest_summary(
     prices: pd.DataFrame,
     target_weights: pd.DataFrame,
-    result: BacktestResult,
     metrics: PerformanceMetrics,
 ) -> None:
     """Print a performance summary."""
@@ -206,6 +212,46 @@ def print_backtest_summary(
     )
 
 
+def print_benchmark_comparison(
+    strategy_metrics: PerformanceMetrics,
+    benchmark_metrics: dict[
+        str,
+        PerformanceMetrics,
+    ],
+) -> None:
+    """Print strategy and benchmark metrics side by side."""
+
+    rows = {
+        "Momentum Strategy": strategy_metrics,
+        **benchmark_metrics,
+    }
+
+    print()
+    print("Benchmark Comparison")
+    print("-" * 82)
+
+    print(
+        f"{'Portfolio':<30}"
+        f"{'CAGR':>10}"
+        f"{'Volatility':>12}"
+        f"{'Sharpe':>10}"
+        f"{'Max DD':>10}"
+        f"{'Calmar':>10}"
+    )
+
+    print("-" * 82)
+
+    for name, metrics in rows.items():
+        print(
+            f"{name:<30}"
+            f"{metrics.cagr:>10.2%}"
+            f"{metrics.annualized_volatility:>12.2%}"
+            f"{format_ratio(metrics.sharpe_ratio):>10}"
+            f"{metrics.max_drawdown:>10.2%}"
+            f"{format_ratio(metrics.calmar_ratio):>10}"
+        )
+
+
 def main(
     argv: Sequence[str] | None = None,
 ) -> None:
@@ -235,7 +281,33 @@ def main(
             config=config,
         )
 
+        result = run_backtest(
+            prices=prices,
+            target_weights=target_weights,
+            config=config,
+        )
+
         metrics = summarize_performance(result)
+
+        benchmark_results = run_benchmarks(
+            prices=prices,
+            strategy_target_weights=target_weights,
+            config=config,
+        )
+
+        benchmark_metrics = {
+            name: summarize_performance(benchmark_result)
+            for name, benchmark_result in benchmark_results.as_dict().items()
+        }
+
+        run_dir = save_analysis_outputs(
+            config=config,
+            strategy_target_weights=target_weights,
+            strategy_result=result,
+            strategy_metrics=metrics,
+            benchmark_results=benchmark_results,
+            benchmark_metrics=benchmark_metrics,
+        )
 
     except (
         ValueError,
@@ -245,5 +317,15 @@ def main(
         parser.error(str(error))
 
     print_backtest_summary(
-        prices=prices, target_weights=target_weights, result=result, metrics=metrics
+        prices=prices,
+        target_weights=target_weights,
+        metrics=metrics,
     )
+
+    print_benchmark_comparison(
+        strategy_metrics=metrics,
+        benchmark_metrics=benchmark_metrics,
+    )
+
+    print()
+    print(f"Results saved to: {run_dir}")

@@ -131,7 +131,6 @@ def run_backtest(
     validate_target_weights(
         weights=target_weights,
         expected_tickers=config.tickers,
-        top_k=config.top_k,
     )
 
     execution_targets = map_signals_to_execution_dates(

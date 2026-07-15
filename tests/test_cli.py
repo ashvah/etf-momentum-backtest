@@ -3,20 +3,112 @@ import pytest
 
 import etf_momentum_backtest.cli as cli
 from etf_momentum_backtest.backtest import BacktestResult
+from etf_momentum_backtest.benchmarks import BenchmarkResults
 from etf_momentum_backtest.config import BacktestConfig
+from pathlib import Path
+
+
+def make_backtest_result(
+    prices: pd.DataFrame,
+    config: BacktestConfig,
+    final_growth: float,
+    transaction_cost: float = 100.0,
+) -> BacktestResult:
+    """Create an internally consistent fake backtest result."""
+
+    index = prices.index
+
+    portfolio_value = pd.Series(
+        [
+            config.initial_capital,
+            config.initial_capital,
+            config.initial_capital * final_growth,
+        ],
+        index=index,
+        name="portfolio_value",
+        dtype="float64",
+    )
+
+    daily_returns = portfolio_value.pct_change(fill_method=None).fillna(0.0)
+    daily_returns.name = "daily_return"
+
+    actual_weights = pd.DataFrame(
+        0.0,
+        index=index,
+        columns=config.tickers,
+        dtype="float64",
+    )
+
+    selected_tickers = list(config.tickers[: config.top_k])
+
+    actual_weights.loc[
+        index[-1],
+        selected_tickers,
+    ] = 1.0 / config.top_k
+
+    cash_balance = pd.Series(
+        [
+            config.initial_capital,
+            config.initial_capital,
+            0.0,
+        ],
+        index=index,
+        name="cash_balance",
+        dtype="float64",
+    )
+
+    turnover = pd.Series(
+        [0.0, 0.0, 1.0],
+        index=index,
+        name="turnover",
+        dtype="float64",
+    )
+
+    transaction_costs = pd.Series(
+        [0.0, 0.0, transaction_cost],
+        index=index,
+        name="transaction_cost",
+        dtype="float64",
+    )
+
+    execution_targets = pd.DataFrame(
+        0.0,
+        index=pd.DatetimeIndex(
+            [index[-1]],
+            name="execution_date",
+        ),
+        columns=config.tickers,
+        dtype="float64",
+    )
+
+    execution_targets.loc[
+        index[-1],
+        selected_tickers,
+    ] = 1.0 / config.top_k
+
+    return BacktestResult(
+        portfolio_value=portfolio_value,
+        daily_returns=daily_returns,
+        actual_weights=actual_weights,
+        cash_balance=cash_balance,
+        turnover=turnover,
+        transaction_costs=transaction_costs,
+        execution_targets=execution_targets,
+    )
 
 
 @pytest.fixture(autouse=True)
 def mock_backtest_pipeline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, list[object]]:
-    """Replace external data, strategy, and backtest operations."""
+    """Replace data, strategy, backtest, and benchmark operations."""
 
     calls: dict[str, list[object]] = {
         "refresh": [],
         "configs": [],
-        "prices": [],
         "target_weights": [],
+        "benchmark_tickers": [],
+        "saved_outputs": [],
     }
 
     def fake_load_prices(
@@ -26,7 +118,7 @@ def mock_backtest_pipeline(
         calls["refresh"].append(refresh)
         calls["configs"].append(config)
 
-        prices = pd.DataFrame(
+        return pd.DataFrame(
             {
                 ticker: [
                     100.0,
@@ -44,10 +136,6 @@ def mock_backtest_pipeline(
             ),
             dtype="float64",
         )
-
-        calls["prices"].append(prices)
-
-        return prices
 
     def fake_generate_target_weights(
         prices: pd.DataFrame,
@@ -76,84 +164,65 @@ def mock_backtest_pipeline(
         target_weights: pd.DataFrame,
         config: BacktestConfig,
     ) -> BacktestResult:
-        index = prices.index
-
-        portfolio_value = pd.Series(
-            [
-                config.initial_capital,
-                config.initial_capital,
-                config.initial_capital * 1.05,
-            ],
-            index=index,
-            name="portfolio_value",
-            dtype="float64",
+        return make_backtest_result(
+            prices=prices,
+            config=config,
+            final_growth=1.05,
         )
 
-        daily_returns = portfolio_value.pct_change(fill_method=None).fillna(0.0)
-        daily_returns.name = "daily_return"
+    def fake_run_benchmarks(
+        prices: pd.DataFrame,
+        strategy_target_weights: pd.DataFrame,
+        config: BacktestConfig,
+        benchmark_ticker: str = "SPY",
+    ) -> BenchmarkResults:
+        calls["benchmark_tickers"].append(benchmark_ticker)
 
-        actual_weights = pd.DataFrame(
-            0.0,
-            index=index,
-            columns=config.tickers,
-            dtype="float64",
+        return BenchmarkResults(
+            benchmark_ticker=benchmark_ticker,
+            market_buy_and_hold=make_backtest_result(
+                prices=prices,
+                config=config,
+                final_growth=1.04,
+                transaction_cost=90.0,
+            ),
+            equal_weight_buy_and_hold=(
+                make_backtest_result(
+                    prices=prices,
+                    config=config,
+                    final_growth=1.03,
+                    transaction_cost=80.0,
+                )
+            ),
+            monthly_equal_weight=(
+                make_backtest_result(
+                    prices=prices,
+                    config=config,
+                    final_growth=1.02,
+                    transaction_cost=120.0,
+                )
+            ),
         )
 
-        selected_tickers = list(config.tickers[: config.top_k])
-
-        actual_weights.loc[
-            index[-1],
-            selected_tickers,
-        ] = 1.0 / config.top_k
-
-        cash_balance = pd.Series(
-            [
-                config.initial_capital,
-                config.initial_capital,
-                0.0,
-            ],
-            index=index,
-            name="cash_balance",
-            dtype="float64",
+    def fake_save_analysis_outputs(
+        config: BacktestConfig,
+        strategy_target_weights: pd.DataFrame,
+        strategy_result: BacktestResult,
+        strategy_metrics: object,
+        benchmark_results: BenchmarkResults,
+        benchmark_metrics: dict[str, object],
+    ) -> Path:
+        calls["saved_outputs"].append(
+            {
+                "config": config,
+                "strategy_target_weights": (strategy_target_weights),
+                "strategy_result": strategy_result,
+                "benchmark_results": (benchmark_results),
+                "benchmark_metrics": (benchmark_metrics),
+            }
         )
 
-        turnover = pd.Series(
-            [
-                0.0,
-                0.0,
-                1.0,
-            ],
-            index=index,
-            name="turnover",
-            dtype="float64",
-        )
-
-        transaction_costs = pd.Series(
-            [
-                0.0,
-                0.0,
-                100.0,
-            ],
-            index=index,
-            name="transaction_cost",
-            dtype="float64",
-        )
-
-        execution_targets = target_weights.copy()
-        execution_targets.index = pd.DatetimeIndex(
-            ["2024-02-01"],
-            name="execution_date",
-        )
-
-        return BacktestResult(
-            portfolio_value=portfolio_value,
-            daily_returns=daily_returns,
-            actual_weights=actual_weights,
-            cash_balance=cash_balance,
-            turnover=turnover,
-            transaction_costs=transaction_costs,
-            execution_targets=execution_targets,
-        )
+        return Path("/tmp/fake-results")
 
     monkeypatch.setattr(
         cli,
@@ -171,6 +240,18 @@ def mock_backtest_pipeline(
         cli,
         "run_backtest",
         fake_run_backtest,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "run_benchmarks",
+        fake_run_benchmarks,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "save_analysis_outputs",
+        fake_save_analysis_outputs,
     )
 
     return calls
@@ -194,7 +275,28 @@ def test_cli_uses_default_tickers(
     assert "Executed 1 rebalances" in output
 
     assert "Final portfolio value: $1,050,000.00" in output
+
     assert "Total return: 5.00%" in output
+
+
+def test_cli_prints_benchmark_comparison(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli.main([])
+
+    output = capsys.readouterr().out
+
+    assert "Benchmark Comparison" in output
+    assert "Momentum Strategy" in output
+    assert "SPY Buy & Hold" in output
+    assert "Equal Weight Buy & Hold" in output
+    assert "Monthly Equal Weight" in output
+
+    assert "CAGR" in output
+    assert "Volatility" in output
+    assert "Sharpe" in output
+    assert "Max DD" in output
+    assert "Calmar" in output
 
 
 def test_cli_accepts_custom_tickers(
@@ -353,6 +455,17 @@ def test_cli_passes_config_to_strategy(
     ] == pytest.approx(0.0)
 
 
+def test_cli_uses_spy_as_default_benchmark(
+    mock_backtest_pipeline: dict[
+        str,
+        list[object],
+    ],
+) -> None:
+    cli.main([])
+
+    assert mock_backtest_pipeline["benchmark_tickers"] == ["SPY"]
+
+
 def test_cli_rejects_top_k_larger_than_universe(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -404,3 +517,20 @@ def test_cli_rejects_negative_transaction_cost(
     error_output = capsys.readouterr().err
 
     assert "transaction_cost_rate" in error_output
+
+
+def test_cli_saves_analysis_outputs(
+    mock_backtest_pipeline: dict[
+        str,
+        list[object],
+    ],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cli.main([])
+
+    output = capsys.readouterr().out
+
+    assert len(mock_backtest_pipeline["saved_outputs"]) == 1
+
+    assert "Results saved to:" in output
+    assert "fake-results" in output

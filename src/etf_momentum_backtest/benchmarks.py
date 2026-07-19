@@ -181,7 +181,7 @@ def run_benchmarks(
     prices: pd.DataFrame,
     strategy_target_weights: pd.DataFrame,
     config: BacktestConfig,
-    benchmark_ticker: str = "SQQQ",
+    benchmark_ticker: str = "TQQQ",
 ) -> BenchmarkResults:
     """Run baseline portfolios using the strategy's signal calendar.
 

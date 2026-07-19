@@ -29,6 +29,9 @@ from etf_momentum_backtest.reporting import (
     save_analysis_outputs,
 )
 
+from etf_momentum_backtest.plots import (
+    save_analysis_figures,
+)
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
@@ -329,3 +332,19 @@ def main(
 
     print()
     print(f"Results saved to: {run_dir}")
+    
+    figure_dir = (
+        config.figures_dir
+        / run_dir.name
+    )
+
+    figure_paths = save_analysis_figures(
+        strategy_result=result,
+        benchmark_results=benchmark_results,
+        target_weights=target_weights,
+        output_dir=figure_dir,
+    )
+
+    print(
+        f"Figures saved to: {figure_dir}"
+    )

@@ -6,6 +6,7 @@ src/etf_momentum_backtest/__main__.py
 src/etf_momentum_backtest/backtest.py
 src/etf_momentum_backtest/cli.py
 src/etf_momentum_backtest/config.py
+src/etf_momentum_backtest/metricx.py
 src/etf_momentum_backtest/strategy.py
 src/etf_momentum_backtest.egg-info/PKG-INFO
 src/etf_momentum_backtest.egg-info/SOURCES.txt
@@ -18,6 +19,7 @@ src/etf_momentum_backtest/data/pipeline.py
 src/etf_momentum_backtest/data/processing.py
 src/etf_momentum_backtest/data/provider.py
 src/etf_momentum_backtest/data/repository.py
+tests/test_backtest.py
 tests/test_cli.py
 tests/test_config.py
 tests/test_strategy.py
